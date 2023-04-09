@@ -10,6 +10,9 @@
 # GOAL: What is the maximum amount of pressure that can be released in the 30
 # minutes we have available?
 
+# Note: I refactored this one a couple times before arriving at my first guess,
+# 712, which was too low. 
+
 ################################################################################
 
 import re
@@ -23,13 +26,61 @@ import re
 
 
 
-# this class will only be used for valve AA (the starting point) and valves with
+# will be used to to store valve connections, regardless of flowrate
+class TunnelSystem:
+
+    # member variable: system (dict)
+    #   key: valve name (string)
+    #   value: list of connected valve names (strings)
+    def __init__(self):
+        self.system = {}
+
+    def AddValve(self, valve_name:str, valve_connections:list):
+        self.system[valve_name] = valve_connections
+
+    # find the length of the shortest path between start and end valves
+    def ShortestPath(self, start:str, end:str) -> int:
+        visited = []
+        return self.__ShortestPath(start, end, visited)
+    
+    # find the length of the shortest path between start and end valves
+    def __ShortestPath(self, start:str, end:str, visited:list) -> int:
+
+        # recursive base case
+        # return 1 instead of 0 to account for the time it takes to open a valve
+        if (start == end):
+            return 1
+        
+        visited.append(start)
+
+        # there are 54 valves in my puzzle input
+        min_path = 54
+
+        for connection in self.system[start]:
+
+            if (connection not in visited):
+
+                distance = self.__ShortestPath(connection, end, visited) + 1
+
+                if distance < min_path:
+                    min_path = distance
+        
+        return min_path
+
+
+
+# will only be used for valve AA (the starting point) and valves with
 # flow rate > 0 (there are 15 such valves in my puzzle input)
 class Valve:
 
     def __init__(self, name:str, fr:int):
+
         self.name = name
         self.flow_rate = fr
+
+        # connections dict
+        #   key: valve name (string)
+        #   value: minutes to reach and open valve (int)
         self.connections = {}
 
     # c_name: name of the connected valve (ex: "AA")
@@ -37,89 +88,72 @@ class Valve:
     def AddConnection(self, c_name:str, distance:int):
         self.connections[c_name] = distance
 
-
-
-# Recursively finds the shortest path between two valves
-def ShortestPath(tunnel_graph:dict, start:str, end:str, visited:list) -> int:
-
-    visited.append(start)
-
-    # there are 54 valves in my puzzle input
-    min_path = 54
-
-    # testing...
-    print(visited)
-
-    # compare the shortest paths to the target from each valve that connects
-    # to the current one
-    for connection in tunnel_graph[start]:
-
-        # testing...
-        print(connection)
-
-        # no need to keep going if one of those connections is the target
-        if (connection == end):
-            return 2
-
-        # also skip any connections that have already been visited
-        elif (connection not in visited):
-
-            # recursively find the shortest path from this connected valve
-            path = ShortestPath(tunnel_graph, connection, end, visited)
-
-            # note if shorter than paths from other connections
-            if (path < min_path):
-                min_path = path
-
-    return min_path
+    def GetDistance(self, c_name:str) -> int:
+        return self.connections[c_name]
 
 
 
-# Recursively calculates the max pressure released from a set of valves
-def CalculateMaxPressure(valve_graph:dict, current_valve:str, 
-                         unopened_valves:list, minutes_remaining:int) -> int:
+# will be used to track distances between valves with flow rate > 0
+class ValveNetwork:
 
-    unopened_valves.remove(current_valve)
-    current_pressure = minutes_remaining * valve_graph[current_valve].flow_rate
-    max_remaining = 0
+    # member variable: graph (dict)
+    #   key: valve name (string)
+    #   value: valve with flow rate > 0 (Valve)
+    def __init__(self):
+        self.graph = {}
 
-    for valve in unopened_valves:
+    def AddValve(self, name, flow_rate):
+        self.graph[name] = Valve(name, flow_rate)
 
-        # update time remaining once new valve is open
-        updated_minutes = minutes_remaining - valve_graph[current_valve].connections[valve]
+    # calculate the maximum amount of pressure that can be released from
+    # the valve network in 30 minutes, starting at valve AA
+    def CalculateMaxPressure(self) -> int:
 
-        # if there isn't enough time to reach this valve, remove it from consideration
-        if (updated_minutes <= 0):
-            unopened_valves.remove(valve)
+        unopened = []
 
-        # if there is enough time, recursively check the max pressure that can
-        # be released by going to this valve next
-        else:
-            pressure = CalculateMaxPressure(valve_graph, valve, unopened_valves, updated_minutes)
+        for key in self.graph:
+            unopened.append(key)
 
-            # note the pressure released by this valve if it's greather than
-            # the pressure released by other valves
-            if (pressure > max_remaining):
-                max_remaining = pressure
+        return self.__CalculateMaxPressure("AA", unopened, 30)
+    
+    # recursively calculate the maximum amount of pressure that can be released
+    # from a subset of valves in the time given
+    def __CalculateMaxPressure(self, current:str, unopened:list, 
+                               time_remaining:int) -> int:
 
-    # Add the pressure released by the current valve to the maximum amount of
-    # pressure that can be released by remaining valves. Return that total.
-    total_pressure = current_pressure + max_remaining
-    return total_pressure
+        # recursive base case: stop when out of time or all valves visited
+        if ((time_remaining <= 0) or (len(unopened) == 0)):
+            return 0
+        
+        unopened.remove(current)
+        pressure_from_current = time_remaining * self.graph[current].flow_rate
+        max_additional_pressure = 0
+
+        # find the maximum amount of pressure that can be released from 
+        # remaining valves
+        for valve in unopened:
+
+            updated_time = time_remaining - self.graph[current].GetDistance(valve)
+            pressure = self.__CalculateMaxPressure(valve, unopened, updated_time)
+
+            if (pressure > max_additional_pressure):
+                max_additional_pressure = pressure
+
+        return (pressure_from_current + max_additional_pressure)
         
 
     
 ################################################################################
 
+
+
 # will be used to find the path with the greatest pressure release
 # key: valve name
-# value: Valve object with flow rate > 0 (or the starting valve)
-useful_valves = {}
+# value: Valve object with flow rate > 0 (plus the starting valve AA)
+valve_network = ValveNetwork()
 
 # will be used to find shortest paths between valves with flow rate > 0
-# key: valve name
-# value: list of connecting valve names (flow rate unimportant)
-tunnel_map = {}
+tunnel_system = TunnelSystem()
 
 # parse puzzle input for valve data
 input_file = open("../Input/D16.txt")
@@ -143,10 +177,10 @@ for line in input_file:
     connections_list = connections_string.strip().split(", ")
 
     # update valve graphs
-    tunnel_map[name_string] = connections_list
+    tunnel_system.AddValve(name_string, connections_list)
 
     if (flow_int > 0) or (name_string == "AA"):
-        useful_valves[name_string] = Valve(name_string, flow_int)
+        valve_network.AddValve(name_string, flow_int)
 
 input_file.close()
 
@@ -155,60 +189,55 @@ input_file.close()
 # # testing...
 
 # counter = 1
-# for valve in useful_valves:
+# for valve in valve_network.graph:
 
-#     print(counter, ":", valve, useful_valves[valve])
+#     print(counter, ":", valve, valve_network.graph[valve])
 #     counter += 1
 
 # print()
 # counter = 1
-# for valve in tunnel_map:
+# for valve in tunnel_system.system:
 
-#     print(counter, ":", valve, tunnel_map[valve])
+#     print(counter, ":", valve, tunnel_system.system[valve])
 #     counter += 1
 
 # # ...caught a parsing error, now we're good!
 
 
 
-# more testing...
-print(ShortestPath(tunnel_map, "ZZ", "ZQ", []))
+# # more testing...
+# print(tunnel_system.ShortestPath("ZZ", "ZQ"))
 
 
 
-# # fill in connection distances between valves with flow rate > 0
-# for valve in useful_valves:
+# fill in connection distances between valves with flow rate > 0
+for valve in valve_network.graph:
 
-#     # testing...
-#     print("Finding connections for Valve", valve)
+    # # testing...
+    # print("Finding connections for Valve", valve)
 
-#     for other_valve in useful_valves:
+    for other_valve in valve_network.graph:
 
-#         # connect every valve to every other valve
-#         if ((valve != other_valve) and 
-#             (useful_valves[valve].connections.get(other_valve)) is None):
+        # connect every valve to every other valve
+        if ((valve != other_valve) and 
+            (valve_network.graph[valve].connections.get(other_valve)) is None):
 
-#             distance = ShortestPath(tunnel_map, valve, other_valve, [])
+            distance = tunnel_system.ShortestPath(valve, other_valve)
 
-#             # testing...
-#             print(valve, "->", other_valve, distance)
+            # # testing...
+            # print(valve, "->", other_valve, distance)
 
-#             useful_valves[valve].AddConnection(other_valve, distance)
-#             useful_valves[other_valve].AddConnection(valve, distance)
+            valve_network.graph[valve].AddConnection(other_valve, distance)
+            valve_network.graph[other_valve].AddConnection(valve, distance)
 
-# # # ...errors resolved, carry on!
+# # ...errors resolved, carry on!
 
 
 
-# # use this list to track which valves have yet to be opened
-# unopened_valves = []
-# for valve in useful_valves:
-#     unopened_valves.append(valve)
+# calculate the maximum pressure that can be released in 30 minutes
+max_pressure_released = valve_network.CalculateMaxPressure()
 
-# # calculate the maximum pressure that can be released in 30 minutes
-# max_pressure_released = CalculateMaxPressure(useful_valves, "AA", unopened_valves, 30)
-
-# # display results
-# print(max_pressure_released)
+# display results
+print(max_pressure_released)
 
 
